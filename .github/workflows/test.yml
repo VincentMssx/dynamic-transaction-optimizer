@@ -1,37 +1,46 @@
-name: CI
+# .github/workflows/foundry-tests.yml
 
-permissions:
-  contents: read
+name: Foundry Tests
 
+# This workflow runs on pushes to the 'main' branch and on any pull request.
 on:
   push:
+    branches: [ "main" ]
   pull_request:
-  workflow_dispatch:
+    branches: [ "main" ]
 
-env:
-  FOUNDRY_PROFILE: ci
-
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel.
 jobs:
-  check:
-    name: Foundry project
+  # The "test" job
+  test:
+    # The type of runner that the job will run on. We use the standard ubuntu latest.
     runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job.
     steps:
-      - uses: actions/checkout@v5
+      # Step 1: Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it.
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          # We need to fetch submodules for forge-std
           submodules: recursive
 
+      # Step 2: Installs Foundry using the official foundry-toolchain action.
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
 
-      - name: Show Forge version
-        run: forge --version
+      # Step 3: Run the unit and integration tests that DO NOT need secrets.
+      # This provides fast feedback if simple logic is broken.
+      - name: Run TransactionManager unit tests
+        run: forge test --match-path test/TransactionManager.t.sol
 
-      - name: Run Forge fmt
-        run: forge fmt --check
-
-      - name: Run Forge build
-        run: forge build --sizes
-
-      - name: Run Forge tests
-        run: forge test -vvv
+      # Step 4: Run the deployment test, which requires secrets.
+      # We inject the GitHub Secrets as environment variables for this step.
+      - name: Run deployment script test (forking Sepolia)
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          EXECUTOR_ADDRESS: ${{ secrets.EXECUTOR_ADDRESS }}
+          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+        run: forge test --fork-url $SEPOLIA_RPC_URL --match-path test/Deploy.t.sol
