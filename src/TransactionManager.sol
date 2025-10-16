@@ -17,12 +17,12 @@ contract TransactionManager {
 
     // A struct to hold all the necessary details for a user's transaction request.
     struct TransactionRequest {
-        address submitter;      // The original user who submitted the request.
+        address submitter; // The original user who submitted the request.
         address targetContract; // The contract the user wants to interact with.
-        bytes data;             // The encoded function call and parameters (calldata).
-        uint256 maxGasPrice;    // The user's maximum acceptable gas price (in Wei).
-        uint256 deadline;       // A Unix timestamp after which the Tx cannot be executed.
-        bool executed;          // A flag to prevent re-execution.
+        bytes data; // The encoded function call and parameters (calldata).
+        uint256 maxGasPrice; // The user's maximum acceptable gas price (in Wei).
+        uint256 deadline; // A Unix timestamp after which the Tx cannot be executed.
+        bool executed; // A flag to prevent re-execution.
     }
 
     // A mapping to store all submitted transaction requests.
@@ -34,7 +34,7 @@ contract TransactionManager {
     // Emitted when a new transaction is successfully submitted.
     // Our off-chain service will listen for this event.
     event TransactionSubmitted(bytes32 indexed txId, address indexed submitter, address targetContract);
-    
+
     // Emitted when a transaction is executed.
     event TransactionExecuted(bytes32 indexed txId, bool success);
 
@@ -72,18 +72,16 @@ contract TransactionManager {
      * @param _deadline The Unix timestamp deadline for execution.
      * @return txId A unique identifier for the transaction request.
      */
-    function submitTransaction(
-        address _targetContract,
-        bytes calldata _data,
-        uint256 _maxGasPrice,
-        uint256 _deadline
-    ) external returns (bytes32 txId) {
+    function submitTransaction(address _targetContract, bytes calldata _data, uint256 _maxGasPrice, uint256 _deadline)
+        external
+        returns (bytes32 txId)
+    {
         require(_deadline > block.timestamp, "Deadline must be in the future");
         require(_targetContract != address(0), "Target contract cannot be the zero address");
 
         // Generate a reasonably unique ID for the transaction request.
         txId = keccak256(abi.encodePacked(msg.sender, block.timestamp, _targetContract, _data));
-        
+
         // Store the request in our mapping.
         transactionRequests[txId] = TransactionRequest({
             submitter: msg.sender,
@@ -114,7 +112,7 @@ contract TransactionManager {
         request.executed = true;
 
         // Use a low-level .call() to execute the transaction.
-        (bool success, ) = request.targetContract.call(request.data);
+        (bool success,) = request.targetContract.call(request.data);
 
         emit TransactionExecuted(_txId, success);
     }
@@ -127,12 +125,12 @@ contract TransactionManager {
         TransactionRequest storage request = transactionRequests[_txId];
         require(request.submitter == msg.sender, "You are not the submitter of this transaction");
         require(!request.executed, "Cannot cancel an executed transaction");
-        
+
         // Delete the request from storage to free up space and prevent execution.
         delete transactionRequests[_txId];
         emit TransactionCancelled(_txId);
     }
-    
+
     /**
      * @notice A critical function to transfer ownership of the contract.
      * This will be used ONE TIME after deployment to set the owner

@@ -6,7 +6,6 @@ import {console} from "../lib/forge-std/src/console.sol";
 import {TransactionManager} from "../src/TransactionManager.sol";
 
 contract DeployTransactionManager is Script {
-    
     function run() external returns (TransactionManager) {
         // --- 1. Load configuration from environment variables ---
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -15,7 +14,7 @@ contract DeployTransactionManager is Script {
         // Check for missing environment variables
         require(deployerPrivateKey != 0, "PRIVATE_KEY must be set in .env file");
         require(executorAddress != address(0), "EXECUTOR_ADDRESS must be set in .env file");
-        
+
         // --- 2. Start broadcasting transactions ---
         // This tells Foundry that any state changes from here on should be
         // sent as real transactions to the specified network.
@@ -34,7 +33,7 @@ contract DeployTransactionManager is Script {
 
         // --- 5. Stop broadcasting ---
         vm.stopBroadcast();
-        
+
         return manager;
     }
 }

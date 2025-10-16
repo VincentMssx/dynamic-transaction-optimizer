@@ -8,7 +8,6 @@ import {TransactionManager} from "../src/TransactionManager.sol";
 // @title DeployTransactionManagerTest
 // @notice This test validates the deployment and post-deployment setup of the TransactionManager.
 contract DeployTransactionManagerTest is Test {
-
     //=========== State Variables for Testing ===========//
     DeployTransactionManager public deployer;
     TransactionManager public manager; // The deployed contract instance

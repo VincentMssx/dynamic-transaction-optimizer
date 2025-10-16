@@ -24,7 +24,7 @@ contract TransactionManagerTest is Test {
         vm.prank(user);
         bytes32 txId = manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp + 1 hours);
         assertNotEq(txId, bytes32(0));
-        (address submitter, address target, , , , ) = manager.transactionRequests(txId);
+        (address submitter, address target,,,,) = manager.transactionRequests(txId);
         assertEq(submitter, user);
         assertEq(target, targetContract);
     }
@@ -40,7 +40,7 @@ contract TransactionManagerTest is Test {
         bytes32 txId = manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp + 1 hours);
         vm.prank(owner);
         manager.executeTransaction(txId);
-        (,,,, , bool executed) = manager.transactionRequests(txId);
+        (,,,,, bool executed) = manager.transactionRequests(txId);
         assertTrue(executed);
     }
 
@@ -57,7 +57,7 @@ contract TransactionManagerTest is Test {
         bytes32 txId = manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp + 1 hours);
         vm.prank(user);
         manager.cancelTransaction(txId);
-        (address submitter, , , , , ) = manager.transactionRequests(txId);
+        (address submitter,,,,,) = manager.transactionRequests(txId);
         assertEq(submitter, address(0));
     }
 
@@ -93,13 +93,13 @@ contract TransactionManagerTest is Test {
         emit TransactionSubmitted(bytes32(0), user, address(0));
 
         bytes32 txId = manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp + 1 hours);
-        
+
         // --- 2. ADVANCE TIME ---
         vm.warp(block.timestamp + 30 minutes);
 
         // --- 3. EXECUTE ---
         vm.prank(owner);
-        
+
         // --- FINAL, ROBUST FIX ---
         // Set up the check. We know the txId now, so we can check it.
         // checkTopic1 (txId): true
@@ -114,7 +114,7 @@ contract TransactionManagerTest is Test {
         manager.executeTransaction(txId);
 
         // --- 4. VERIFY FINAL STATE ---
-        (,,,, , bool executed) = manager.transactionRequests(txId);
+        (,,,,, bool executed) = manager.transactionRequests(txId);
         assertTrue(executed, "Request should be marked as executed");
 
         // --- 5. ATTEMPT DOUBLE EXECUTION ---
