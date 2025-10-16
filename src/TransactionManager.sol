@@ -46,8 +46,12 @@ contract TransactionManager {
     // This is the security guard for our critical functions. It ensures
     // that only the 'owner' address can call a function.
     modifier onlyOwner() {
-        require(msg.sender == owner, "Caller is not the owner");
+        _onlyOwner();
         _;
+    }
+
+    function _onlyOwner() internal view {
+        require(msg.sender == owner, "Caller is not the owner");
     }
 
     //=========== Functions ===========//
