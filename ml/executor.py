@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import pandas as pd
 import joblib
 from web3 import Web3
@@ -12,18 +13,21 @@ load_dotenv('../.env') # Load variables from the root .env file
 
 # Load environment variables
 SEPOLIA_RPC_URL = os.getenv("SEPOLIA_RPC_URL")
-# IMPORTANT: This must be the private key for the EXECUTOR_ADDRESS set in your .env
 EXECUTOR_PRIVATE_KEY = os.getenv("EXECUTOR_PRIVATE_KEY") 
+CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
 
-# Contract details - UPDATE THESE AFTER DEPLOYMENT
-# The address of your deployed TransactionManager contract
-CONTRACT_ADDRESS = "0xYourDeployedContractAddressGoesHere" 
-# Paste the ABI array from out/TransactionManager.sol/TransactionManager.json here
-CONTRACT_ABI = """
-[
-{"type":"constructor","inputs":[],"stateMutability":"nonpayable"},{"type":"function","name":"cancelTransaction","inputs":[{"name":"_txId","type":"bytes32","internalType":"bytes32"}],"outputs":[],"stateMutability":"nonpayable"},{"type":"function","name":"executeTransaction","inputs":[{"name":"_txId","type":"bytes32","internalType":"bytes32"}],"outputs":[],"stateMutability":"nonpayable"},{"type":"function","name":"owner","inputs":[],"outputs":[{"name":"","type":"address","internalType":"address"}],"stateMutability":"view"},{"type":"function","name":"submitTransaction","inputs":[{"name":"_targetContract","type":"address","internalType":"address"},{"name":"_data","type":"bytes","internalType":"bytes"},{"name":"_maxGasPrice","type":"uint256","internalType":"uint256"},{"name":"_deadline","type":"uint256","internalType":"uint256"}],"outputs":[{"name":"txId","type":"bytes32","internalType":"bytes32"}],"stateMutability":"nonpayable"},{"type":"function","name":"transactionRequests","inputs":[{"name":"","type":"bytes32","internalType":"bytes32"}],"outputs":[{"name":"submitter","type":"address","internalType":"address"},{"name":"targetContract","type":"address","internalType":"address"},{"name":"data","type":"bytes","internalType":"bytes"},{"name":"maxGasPrice","type":"uint256","internalType":"uint256"},{"name":"deadline","type":"uint256","internalType":"uint256"},{"name":"executed","type":"bool","internalType":"bool"}],"stateMutability":"view"},{"type":"function","name":"transferOwnership","inputs":[{"name":"newOwner","type":"address","internalType":"address"}],"outputs":[],"stateMutability":"nonpayable"},{"type":"event","name":"TransactionCancelled","inputs":[{"name":"txId","type":"bytes32","indexed":true,"internalType":"bytes32"}],"anonymous":false},{"type":"event","name":"TransactionExecuted","inputs":[{"name":"txId","type":"bytes32","indexed":true,"internalType":"bytes32"},{"name":"success","type":"bool","indexed":false,"internalType":"bool"}],"anonymous":false},{"type":"event","name":"TransactionSubmitted","inputs":[{"name":"txId","type":"bytes32","indexed":true,"internalType":"bytes32"},{"name":"submitter","type":"address","indexed":true,"internalType":"address"},{"name":"targetContract","type":"address","indexed":false,"internalType":"address"}],"anonymous":false}
-]
-"""
+# --- Constants ---
+ABI_FILE_PATH = "../out/TransactionManager.sol/TransactionManager.json"
+PERSISTENCE_FILE = "tracked_transactions.json"
+DEADLINE_THRESHOLD_SECONDS = 900 # 15 minutes
+
+def load_abi(file_path):
+    """Loads the ABI from a JSON file."""
+    with open(file_path, 'r') as f:
+        data = json.load(f)
+        return data['abi']
+
+CONTRACT_ABI = load_abi(ABI_FILE_PATH)
 
 # Check for missing configuration
 if not all([SEPOLIA_RPC_URL, EXECUTOR_PRIVATE_KEY, CONTRACT_ADDRESS]):
@@ -36,108 +40,105 @@ w3 = Web3(Web3.HTTPProvider(SEPOLIA_RPC_URL))
 if not w3.is_connected():
     raise ConnectionError("Failed to connect to the Ethereum node.")
 
-# Set up the executor account from its private key
 executor_account = w3.eth.account.from_key(EXECUTOR_PRIVATE_KEY)
-# Verify the address matches the one you set as owner
 print(f"Executor account address: {executor_account.address}")
 
-# Load the smart contract instance
 contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=CONTRACT_ABI)
 
-# Load the trained machine learning model
 print("Loading gas prediction model...")
 model = joblib.load('gas_predictor.pkl')
 print("Setup complete. Model and contract loaded.")
 
-# A simple in-memory store for transactions we are tracking
-# In a production system, you would use a database for this.
-tracked_transactions = {}
+# --- Persistence Functions ---
+def save_tracked_transactions(transactions):
+    """Saves the tracked transactions to a file."""
+    # Convert bytes to hex for JSON serialization
+    serializable_txs = {tx_id.hex(): tx_info for tx_id, tx_info in transactions.items()}
+    with open(PERSISTENCE_FILE, 'w') as f:
+        json.dump(serializable_txs, f, indent=4)
+
+def load_tracked_transactions():
+    """Loads tracked transactions from a file."""
+    if not os.path.exists(PERSISTENCE_FILE):
+        return {}
+    with open(PERSISTENCE_FILE, 'r') as f:
+        serializable_txs = json.load(f)
+        # Convert hex back to bytes
+        return {bytes.fromhex(tx_id): tx_info for tx_id, tx_info in serializable_txs.items()}
 
 # --- 3. CORE ORACLE FUNCTIONS ---
 # --------------------------------
 
 def get_live_features():
-    """
-    Fetches live data from the blockchain and engineers the features
-    required by our trained model.
-    """
+    """Fetches live data from the blockchain for the model."""
     try:
         latest_block = w3.eth.get_block('latest')
-        
-        # Current gas price (base fee)
         current_gas_gwei = latest_block.base_fee_per_gas / 1e9
-        
-        # Time-based features
         now = pd.Timestamp.now(tz='UTC')
-        hour_of_day = now.hour
-        day_of_week = now.dayofweek
-        month = now.month
         
-        # NOTE: For rolling_avg and lag features, a real production system would
-        # query the last 24 hours of blocks. For this example, we'll use a simplified
-        # placeholder. We'll use the current price as a stand-in for these features.
-        rolling_avg_24h = current_gas_gwei 
-        lag_1h = current_gas_gwei
-
-        # Create a DataFrame in the exact format the model was trained on
+        # In a production system, you would query historical data.
+        # For this example, we continue to use placeholders.
         feature_df = pd.DataFrame([{
             'avg_gas_in_gwei': current_gas_gwei,
-            'hour_of_day': float(hour_of_day),
-            'day_of_week': float(day_of_week),
-            'month': float(month),
-            'rolling_avg_24h': rolling_avg_24h,
-            'lag_1h': lag_1h
+            'hour_of_day': float(now.hour),
+            'day_of_week': float(now.dayofweek),
+            'month': float(now.month),
+            'rolling_avg_24h': current_gas_gwei, 
+            'lag_1h': current_gas_gwei
         }])
-        
         return feature_df, current_gas_gwei
     except Exception as e:
         print(f"Error fetching live features: {e}")
         return None, None
 
 def make_decision(tx_request):
-    """
-    Uses the ML model to predict future gas price and decides whether to execute.
-    """
+    """Uses the ML model and deadline to decide whether to execute."""
     features, current_gas = get_live_features()
     if features is None:
-        return False # Don't execute if we can't get data
+        return False
 
-    # Use the model to predict the gas price in the next hour
     predicted_gas = model.predict(features)[0]
+    user_max_gas = tx_request['maxGasPrice'] / 1e9
+    deadline = tx_request['deadline']
     
-    user_max_gas = tx_request['maxGasPrice'] / 1e9 # Convert from Wei to Gwei
-    
-    print(f"Decision logic for TxID {tx_request['txId'][:10]}... | "
-          f"Current Gas: {current_gas:.2f} Gwei | "
-          f"Predicted Gas: {predicted_gas:.2f} Gwei | "
-          f"User Max: {user_max_gas:.2f} Gwei")
+    print(f"Decision logic for TxID {tx_request['txId'].hex()[:10]}... | "
+          f"Current Gas: {current_gas:.2f} | Predicted: {predicted_gas:.2f} | "
+          f"User Max: {user_max_gas:.2f} | Deadline in: {(deadline - time.time())/60:.1f} mins")
 
-    # --- THE CORE DECISION LOGIC ---
-    # 1. The current price must be below the user's maximum.
     is_below_max = current_gas < user_max_gas
-    # 2. We execute if the current price is good AND we predict it will rise.
-    is_good_time = current_gas < (predicted_gas * 1.05) # Execute if current price is lower than predicted
-    
-    if is_below_max and is_good_time:
-        print("DECISION: Execute transaction.")
+    is_good_time = current_gas < (predicted_gas * 1.05)
+    is_urgent = (deadline - time.time()) < DEADLINE_THRESHOLD_SECONDS
+
+    if not is_below_max:
+        print("DECISION: Wait. Current gas is above user's max.")
+        return False
+
+    if is_urgent:
+        print("DECISION: Execute. Transaction is urgent.")
+        return True
+
+    if is_good_time:
+        print("DECISION: Execute. Gas price is favorable.")
         return True
     else:
         print("DECISION: Wait for a better time.")
         return False
 
 def execute_transaction_on_chain(tx_id):
-    """
-    Builds, signs, and sends the transaction to call 'executeTransaction' on the contract.
-    """
+    """Builds, signs, and sends the transaction with refined gas estimation."""
     try:
-        print(f"Building transaction to execute TxID {tx_id[:10]}...")
+        print(f"Building transaction to execute TxID {tx_id.hex()[:10]}...")
         
-        # Build the transaction object
+        # Refined Gas Estimation
+        gas_estimate = contract.functions.executeTransaction(tx_id).estimate_gas({
+            'from': executor_account.address
+        })
+        gas_limit = int(gas_estimate * 1.2) # Add a 20% buffer
+
         tx_call = contract.functions.executeTransaction(tx_id).build_transaction({
             'from': executor_account.address,
             'nonce': w3.eth.get_transaction_count(executor_account.address),
-            'gas': 200000, # Set a reasonable gas limit
-            # Use the latest base fee + a 2 Gwei priority fee for faster inclusion
+            'gas': gas_limit,
             'maxFeePerGas': w3.eth.get_block('latest')['baseFeePerGas'] + w3.to_wei(2, 'gwei'),
             'maxPriorityFeePerGas': w3.to_wei(2, 'gwei'),
         })
@@ -149,10 +150,10 @@ def execute_transaction_on_chain(tx_id):
         receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
         
         if receipt.status == 1:
-            print(f"SUCCESS: Transaction {tx_id[:10]}... executed successfully.")
+            print(f"SUCCESS: Transaction {tx_id.hex()[:10]}... executed successfully.")
             return True
         else:
-            print(f"FAIL: Transaction {tx_id[:10]}... execution failed on-chain.")
+            print(f"FAIL: Transaction {tx_id.hex()[:10]}... execution failed on-chain.")
             return False
 
     except Exception as e:
@@ -164,48 +165,46 @@ def execute_transaction_on_chain(tx_id):
 
 def main_loop():
     print("\n--- Starting Main Oracle Loop ---")
-    # In a real app, you would listen for 'TransactionSubmitted' events.
-    # To keep this example simple, we will manually check a transaction.
-    # We will simulate that we "heard" an event and have a txId to track.
+    tracked_transactions = load_tracked_transactions()
+    print(f"Loaded {len(tracked_transactions)} transactions from persistence file.")
     
-    # TODO: Replace with a real event listener and a database of txIds.
-    # For now, we will need to get a txId by submitting a transaction manually
-    # and pasting the txId here.
-    
-    # EXAMPLE: manually_tracked_tx_id = "0xc4f55d33df64ffba4af52153eec2ef3af93a2c7ac5aabaf2d401b7f142100c76"
-    manually_tracked_tx_id = None # Set this to a real TxID to test
-
-    if not manually_tracked_tx_id:
-        print("\nWARNING: No transaction to track. Please submit a transaction to the contract" \
-              " and paste its 'txId' into the 'manually_tracked_tx_id' variable.")
+    event_filter = contract.events.TransactionSubmitted.create_filter(from_block="latest")
 
     while True:
-        if manually_tracked_tx_id:
-            try:
-                # Get the latest details of the transaction from the contract
+        for event in event_filter.get_new_entries():
+            tx_id = event['args']['txId']
+            if tx_id not in tracked_transactions:
+                print(f"New transaction submitted: {tx_id.hex()}")
+                # We need the full transaction details for the decision logic
                 (submitter, target, data, max_gas, deadline, executed) = \
-                    contract.functions.transactionRequests(manually_tracked_tx_id).call()
+                    contract.functions.transactionRequests(tx_id).call()
+                tracked_transactions[tx_id] = {
+                    "txId": tx_id,
+                    "maxGasPrice": max_gas,
+                    "deadline": deadline
+                }
+                save_tracked_transactions(tracked_transactions)
+
+        for tx_id, tx_info in list(tracked_transactions.items()):
+            try:
+                (submitter, _, _, _, _, executed) = contract.functions.transactionRequests(tx_id).call()
 
                 if submitter != '0x0000000000000000000000000000000000000000' and not executed:
-                    tx_request = {
-                        "txId": manually_tracked_tx_id,
-                        "maxGasPrice": max_gas
-                    }
-                    if make_decision(tx_request):
-                        if execute_transaction_on_chain(manually_tracked_tx_id):
-                            # Stop tracking after successful execution
-                             manually_tracked_tx_id = None
-                             print("Transaction processed. Halting loop for this example.")
-                             break 
+                    if make_decision(tx_info):
+                        if execute_transaction_on_chain(tx_id):
+                            del tracked_transactions[tx_id]
+                            save_tracked_transactions(tracked_transactions)
+                            print(f"Transaction {tx_id.hex()} processed and removed.")
                 else:
-                    print(f"Transaction {manually_tracked_tx_id[:10]}... is already executed or cancelled. Halting.")
-                    break
-            except Exception as e:
-                 print(f"An error occurred in the main loop: {e}")
+                    print(f"Transaction {tx_id.hex()[:10]}... is old. Removing.")
+                    del tracked_transactions[tx_id]
+                    save_tracked_transactions(tracked_transactions)
 
-        # Wait for 60 seconds before the next check
-        print("Sleeping for 60 seconds...")
-        time.sleep(60)
+            except Exception as e:
+                 print(f"An error occurred in the main loop for tx {tx_id.hex()}: {e}")
+
+        print(f"Sleeping for 15 seconds... Tracking {len(tracked_transactions)} transactions.")
+        time.sleep(15)
 
 if __name__ == "__main__":
     main_loop()
