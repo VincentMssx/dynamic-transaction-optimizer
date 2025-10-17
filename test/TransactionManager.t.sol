@@ -4,11 +4,19 @@ pragma solidity ^0.8.20;
 import {Test} from "../lib/forge-std/src/Test.sol";
 import {TransactionManager} from "../src/TransactionManager.sol";
 
+// A simple contract that can revert
+contract RevertingContract {
+    function revertFunction() public pure {
+        revert("I am reverting");
+    }
+}
+
 contract TransactionManagerTest is Test {
     TransactionManager public manager;
     address public owner = makeAddr("owner");
     address public user = makeAddr("user");
     address public targetContract = makeAddr("targetContract");
+    RevertingContract public revertingContract;
 
     event TransactionSubmitted(bytes32 indexed txId, address indexed submitter, address targetContract);
     event TransactionExecuted(bytes32 indexed txId, bool success);
@@ -16,6 +24,7 @@ contract TransactionManagerTest is Test {
     function setUp() public {
         vm.prank(owner);
         manager = new TransactionManager();
+        revertingContract = new RevertingContract();
     }
 
     // --- Unit Tests ---
@@ -35,6 +44,12 @@ contract TransactionManagerTest is Test {
         manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp - 1);
     }
 
+    function test_unit_submitTransaction_failsWithZeroAddress() public {
+        vm.prank(user);
+        vm.expectRevert("Target contract cannot be the zero address");
+        manager.submitTransaction(address(0), "0x", 100 gwei, block.timestamp + 1 hours);
+    }
+
     function test_unit_executeTransaction_succeedsAsOwner() public {
         vm.prank(user);
         bytes32 txId = manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp + 1 hours);
@@ -49,6 +64,50 @@ contract TransactionManagerTest is Test {
         bytes32 txId = manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp + 1 hours);
         vm.prank(user);
         vm.expectRevert("Caller is not the owner");
+        manager.executeTransaction(txId);
+    }
+
+    function test_unit_executeTransaction_failsWithNonExistentTx() public {
+        vm.prank(owner);
+        vm.expectRevert("Transaction does not exist");
+        manager.executeTransaction(bytes32(0));
+    }
+
+    function test_unit_executeTransaction_failsWhenAlreadyExecuted() public {
+        vm.prank(user);
+        bytes32 txId = manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp + 1 hours);
+        vm.prank(owner);
+        manager.executeTransaction(txId);
+        vm.prank(owner);
+        vm.expectRevert("Transaction already executed");
+        manager.executeTransaction(txId);
+    }
+
+    function test_unit_executeTransaction_failsWhenDeadlinePassed() public {
+        vm.prank(user);
+        bytes32 txId = manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp + 1 hours);
+        vm.warp(block.timestamp + 2 hours);
+        vm.prank(owner);
+        vm.expectRevert("Transaction deadline has passed");
+        manager.executeTransaction(txId);
+    }
+
+    function test_unit_executeTransaction_failsWithHighGasPrice() public {
+        vm.prank(user);
+        bytes32 txId = manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp + 1 hours);
+        vm.prank(owner);
+        vm.txGasPrice(101 gwei);
+        vm.expectRevert("Current gas price exceeds user's max");
+        manager.executeTransaction(txId);
+    }
+
+    function test_unit_executeTransaction_failsWithFailedCall() public {
+        vm.prank(user);
+        bytes memory callData = abi.encodeWithSignature("revertFunction()");
+        bytes32 txId = manager.submitTransaction(address(revertingContract), callData, 100 gwei, block.timestamp + 1 hours);
+        vm.prank(owner);
+        vm.expectEmit(true, false, false, true);
+        emit TransactionExecuted(txId, false);
         manager.executeTransaction(txId);
     }
 
@@ -68,6 +127,22 @@ contract TransactionManagerTest is Test {
         vm.prank(otherUser);
         vm.expectRevert("You are not the submitter of this transaction");
         manager.cancelTransaction(txId);
+    }
+
+    function test_unit_cancelTransaction_failsWhenAlreadyExecuted() public {
+        vm.prank(user);
+        bytes32 txId = manager.submitTransaction(targetContract, "0x", 100 gwei, block.timestamp + 1 hours);
+        vm.prank(owner);
+        manager.executeTransaction(txId);
+        vm.prank(user);
+        vm.expectRevert("Cannot cancel an executed transaction");
+        manager.cancelTransaction(txId);
+    }
+
+    function test_unit_transferOwnership_failsWithZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert("New owner cannot be the zero address");
+        manager.transferOwnership(address(0));
     }
 
     // --- Integration Test ---

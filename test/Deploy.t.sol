@@ -13,7 +13,7 @@ contract DeployTransactionManagerTest is Test {
     TransactionManager public manager; // The deployed contract instance
 
     // These will be loaded from our .env file during the test
-    address executorAdress = vm.envAddress("EXECUTOR_ADDRESS");
+    address executorAddress = vm.envAddress("EXECUTOR_ADDRESS");
     uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
     //=========== Setup Function ===========//
@@ -36,7 +36,7 @@ contract DeployTransactionManagerTest is Test {
         // --- 1. Pre-flight checks ---
         // Ensure that the necessary environment variables are set for the test to run.
         require(deployerPrivateKey != 0, "TEST ERROR: PRIVATE_KEY env var not set.");
-        require(executorAdress != address(0), "TEST ERROR: EXECUTOR_ADDRESS env var not set.");
+        require(executorAddress != address(0), "TEST ERROR: EXECUTOR_ADDRESS env var not set.");
 
         // --- 2. Run the deployment script ---
         // The script returns the deployed contract instance, which we capture.
@@ -51,10 +51,20 @@ contract DeployTransactionManagerTest is Test {
         // Assertion 2: The MOST IMPORTANT check. Verify that the 'owner' of the
         // deployed contract is the EXECUTOR_ADDRESS we specified in our .env file.
         address currentOwner = manager.owner();
-        assertEq(currentOwner, executorAdress, "Ownership was not transferred correctly.");
+        assertEq(currentOwner, executorAddress, "Ownership was not transferred correctly.");
 
         // Assertion 3 (Optional but good): Check that the deployer is NO LONGER the owner.
         address deployerAddress = vm.addr(deployerPrivateKey);
         assertNotEq(currentOwner, deployerAddress, "Deployer should no longer be the owner.");
+    }
+
+    function test_deploymentScript_failsWithoutPrivateKey() public {
+        vm.expectRevert("PRIVATE_KEY must be set in .env file");
+        deployer.runWithConfig(0, executorAddress);
+    }
+
+    function test_deploymentScript_failsWithoutExecutorAddress() public {
+        vm.expectRevert("EXECUTOR_ADDRESS must be set in .env file");
+        deployer.runWithConfig(deployerPrivateKey, address(0));
     }
 }

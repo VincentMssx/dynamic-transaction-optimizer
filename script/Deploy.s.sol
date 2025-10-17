@@ -7,9 +7,13 @@ import {TransactionManager} from "../src/TransactionManager.sol";
 
 contract DeployTransactionManager is Script {
     function run() external returns (TransactionManager) {
-        // --- 1. Load configuration from environment variables ---
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address executorAddress = vm.envAddress("EXECUTOR_ADDRESS");
+        return runWithConfig(deployerPrivateKey, executorAddress);
+    }
+
+    function runWithConfig(uint256 deployerPrivateKey, address executorAddress) public returns (TransactionManager) {
+        // --- 1. Load configuration from environment variables ---
 
         // Check for missing environment variables
         require(deployerPrivateKey != 0, "PRIVATE_KEY must be set in .env file");
